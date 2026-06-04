@@ -7,6 +7,9 @@ signal forward_shot_requested(origin: Vector2, direction: Vector2)
 @export var fire_interval := 0.55
 @export var forward_fire_interval := 0.38
 
+@export var limit_x := 1470.0
+@export var limit_y := 1470.0
+
 var aim_direction := Vector2.RIGHT
 var health := 5
 var control_enabled := true
@@ -16,6 +19,11 @@ var _touch_active := false
 var _touch_origin := Vector2.ZERO
 var _touch_position := Vector2.ZERO
 var _nearest_enemy: Node2D
+var knockback := Vector2.ZERO
+var gravity_pull := Vector2.ZERO
+
+func _ready() -> void:
+	motion_mode = CharacterBody2D.MOTION_MODE_FLOATING
 
 func _physics_process(delta: float) -> void:
 	if not control_enabled:
@@ -24,8 +32,12 @@ func _physics_process(delta: float) -> void:
 	var direction := _get_move_direction()
 	if direction.length() > 0.0:
 		aim_direction = direction.normalized()
-	velocity = direction * speed
+	velocity = direction * speed + knockback + gravity_pull
 	move_and_slide()
+	global_position.x = clamp(global_position.x, -limit_x, limit_x)
+	global_position.y = clamp(global_position.y, -limit_y, limit_y)
+	knockback = knockback.move_toward(Vector2.ZERO, 900.0 * delta)
+	gravity_pull = Vector2.ZERO
 
 	_fire_timer -= delta
 	if _fire_timer <= 0.0:
@@ -43,8 +55,19 @@ func _physics_process(delta: float) -> void:
 func set_nearest_enemy(enemy: Node2D) -> void:
 	_nearest_enemy = enemy
 
-func damage(amount: int) -> void:
+signal damaged(amount: int)
+
+func damage(amount: int, source_position := Vector2.ZERO) -> void:
 	health -= amount
+	damaged.emit(amount)
+	
+	if source_position != Vector2.ZERO:
+		var push_dir := source_position.direction_to(global_position).normalized()
+		knockback = push_dir * 500.0
+	
+	var tween = create_tween()
+	modulate = Color(8.0, 1.5, 1.5, 1.0)
+	tween.tween_property(self, "modulate", Color(1.0, 1.0, 1.0, 1.0), 0.12)
 
 func set_control_enabled(enabled: bool) -> void:
 	control_enabled = enabled
@@ -52,7 +75,9 @@ func set_control_enabled(enabled: bool) -> void:
 		_touch_active = false
 		velocity = Vector2.ZERO
 
-func _unhandled_input(event: InputEvent) -> void:
+func _input(event: InputEvent) -> void:
+	if not control_enabled:
+		return
 	if event is InputEventScreenTouch:
 		_touch_active = event.pressed
 		_touch_origin = event.position
@@ -77,5 +102,5 @@ func _get_move_direction() -> Vector2:
 	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN):
 		direction.y += 1.0
 	if _touch_active:
-		direction = (_touch_position - _touch_origin) / 96.0
+		direction = (_touch_position - _touch_origin) / 60.0
 	return direction.limit_length(1.0)
